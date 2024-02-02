@@ -21,6 +21,7 @@
 *.elf
 *.gcno
 *.gz
+*.gz-dtb
 *.i
 *.ko
 *.lex.c
@@ -116,6 +117,8 @@ ID
 
 *.orig
 *~
+*.bak
+*.rej
 \#*#
 
 #
