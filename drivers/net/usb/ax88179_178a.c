@@ -65,7 +65,237 @@ const struct ethtool_ops ax88179_ethtool_ops = {
 
 int ax88179_signature(struct ax_device *axdev, struct _ax_ioctl_command *info)
 {
-	strlcpy(info->sig, AX88179_SIGNATURE, sizeof(info->sig));
+	int ret;
+	int (*fn)(struct usbnet *, u8, u8, u16, u16, void *, u16);
+
+	BUG_ON(!dev);
+
+	if (!in_pm)
+		fn = usbnet_read_cmd;
+	else
+		fn = usbnet_read_cmd_nopm;
+
+	ret = fn(dev, cmd, USB_DIR_IN | USB_TYPE_VENDOR | USB_RECIP_DEVICE,
+		 value, index, data, size);
+
+	if (unlikely(ret < 0))
+		netdev_warn(dev->net, "Failed to read reg index 0x%04x: %d\n",
+			    index, ret);
+
+	return ret;
+}
+
+static int __ax88179_write_cmd(struct usbnet *dev, u8 cmd, u16 value, u16 index,
+			       u16 size, void *data, int in_pm)
+{
+	int ret;
+	int (*fn)(struct usbnet *, u8, u8, u16, u16, const void *, u16);
+
+	BUG_ON(!dev);
+
+	if (!in_pm)
+		fn = usbnet_write_cmd;
+	else
+		fn = usbnet_write_cmd_nopm;
+
+	ret = fn(dev, cmd, USB_DIR_OUT | USB_TYPE_VENDOR | USB_RECIP_DEVICE,
+		 value, index, data, size);
+
+	if (unlikely(ret < 0))
+		netdev_warn(dev->net, "Failed to write reg index 0x%04x: %d\n",
+			    index, ret);
+
+	return ret;
+}
+
+static void ax88179_write_cmd_async(struct usbnet *dev, u8 cmd, u16 value,
+				    u16 index, u16 size, void *data)
+{
+	u16 buf;
+
+	if (2 == size) {
+		buf = *((u16 *)data);
+		cpu_to_le16s(&buf);
+		usbnet_write_cmd_async(dev, cmd, USB_DIR_OUT | USB_TYPE_VENDOR |
+				       USB_RECIP_DEVICE, value, index, &buf,
+				       size);
+	} else {
+		usbnet_write_cmd_async(dev, cmd, USB_DIR_OUT | USB_TYPE_VENDOR |
+				       USB_RECIP_DEVICE, value, index, data,
+				       size);
+	}
+}
+
+static int ax88179_read_cmd_nopm(struct usbnet *dev, u8 cmd, u16 value,
+				 u16 index, u16 size, void *data)
+{
+	int ret;
+
+	if (2 == size) {
+		u16 buf;
+		ret = __ax88179_read_cmd(dev, cmd, value, index, size, &buf, 1);
+		le16_to_cpus(&buf);
+		*((u16 *)data) = buf;
+	} else if (4 == size) {
+		u32 buf;
+		ret = __ax88179_read_cmd(dev, cmd, value, index, size, &buf, 1);
+		le32_to_cpus(&buf);
+		*((u32 *)data) = buf;
+	} else {
+		ret = __ax88179_read_cmd(dev, cmd, value, index, size, data, 1);
+	}
+
+	return ret;
+}
+
+static int ax88179_write_cmd_nopm(struct usbnet *dev, u8 cmd, u16 value,
+				  u16 index, u16 size, void *data)
+{
+	int ret;
+
+	if (2 == size) {
+		u16 buf;
+		buf = *((u16 *)data);
+		cpu_to_le16s(&buf);
+		ret = __ax88179_write_cmd(dev, cmd, value, index,
+					  size, &buf, 1);
+	} else {
+		ret = __ax88179_write_cmd(dev, cmd, value, index,
+					  size, data, 1);
+	}
+
+	return ret;
+}
+
+static int ax88179_read_cmd(struct usbnet *dev, u8 cmd, u16 value, u16 index,
+			    u16 size, void *data)
+{
+	int ret;
+
+	if (2 == size) {
+		u16 buf = 0;
+		ret = __ax88179_read_cmd(dev, cmd, value, index, size, &buf, 0);
+		le16_to_cpus(&buf);
+		*((u16 *)data) = buf;
+	} else if (4 == size) {
+		u32 buf = 0;
+		ret = __ax88179_read_cmd(dev, cmd, value, index, size, &buf, 0);
+		le32_to_cpus(&buf);
+		*((u32 *)data) = buf;
+	} else {
+		ret = __ax88179_read_cmd(dev, cmd, value, index, size, data, 0);
+	}
+
+	return ret;
+}
+
+static int ax88179_write_cmd(struct usbnet *dev, u8 cmd, u16 value, u16 index,
+			     u16 size, void *data)
+{
+	int ret;
+
+	if (2 == size) {
+		u16 buf;
+		buf = *((u16 *)data);
+		cpu_to_le16s(&buf);
+		ret = __ax88179_write_cmd(dev, cmd, value, index,
+					  size, &buf, 0);
+	} else {
+		ret = __ax88179_write_cmd(dev, cmd, value, index,
+					  size, data, 0);
+	}
+
+	return ret;
+}
+
+static void ax88179_status(struct usbnet *dev, struct urb *urb)
+{
+	struct ax88179_int_data *event;
+	u32 link;
+
+	if (urb->actual_length < 8)
+		return;
+
+	event = urb->transfer_buffer;
+	le32_to_cpus((void *)&event->intdata1);
+
+	link = (((__force u32)event->intdata1) & AX_INT_PPLS_LINK) >> 16;
+
+	if (netif_carrier_ok(dev->net) != link) {
+		usbnet_link_change(dev, link, 1);
+		netdev_info(dev->net, "ax88179 - Link status is: %d\n", link);
+	}
+}
+
+static int ax88179_mdio_read(struct net_device *netdev, int phy_id, int loc)
+{
+	struct usbnet *dev = netdev_priv(netdev);
+	u16 res;
+
+	ax88179_read_cmd(dev, AX_ACCESS_PHY, phy_id, (__u16)loc, 2, &res);
+	return res;
+}
+
+static void ax88179_mdio_write(struct net_device *netdev, int phy_id, int loc,
+			       int val)
+{
+	struct usbnet *dev = netdev_priv(netdev);
+	u16 res = (u16) val;
+
+	ax88179_write_cmd(dev, AX_ACCESS_PHY, phy_id, (__u16)loc, 2, &res);
+}
+
+static inline int ax88179_phy_mmd_indirect(struct usbnet *dev, u16 prtad,
+					   u16 devad)
+{
+	u16 tmp16;
+	int ret;
+
+	tmp16 = devad;
+	ret = ax88179_write_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
+				MII_MMD_CTRL, 2, &tmp16);
+
+	tmp16 = prtad;
+	ret = ax88179_write_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
+				MII_MMD_DATA, 2, &tmp16);
+
+	tmp16 = devad | MII_MMD_CTRL_NOINCR;
+	ret = ax88179_write_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
+				MII_MMD_CTRL, 2, &tmp16);
+
+	return ret;
+}
+
+static int
+ax88179_phy_read_mmd_indirect(struct usbnet *dev, u16 prtad, u16 devad)
+{
+	int ret;
+	u16 tmp16;
+
+	ax88179_phy_mmd_indirect(dev, prtad, devad);
+
+	ret = ax88179_read_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
+			       MII_MMD_DATA, 2, &tmp16);
+	if (ret < 0)
+		return ret;
+
+	return tmp16;
+}
+
+static int
+ax88179_phy_write_mmd_indirect(struct usbnet *dev, u16 prtad, u16 devad,
+			       u16 data)
+{
+	int ret;
+
+	ax88179_phy_mmd_indirect(dev, prtad, devad);
+
+	ret = ax88179_write_cmd(dev, AX_ACCESS_PHY, AX88179_PHY_ID,
+				MII_MMD_DATA, 2, &data);
+
+	if (ret < 0)
+		return ret;
+
 	return 0;
 }
 
@@ -1057,67 +1287,120 @@ static void ax88179_rx_fixup
 	struct net_device *netdev = axdev->netdev;
 	struct net_device_stats *stats = ax_get_stats(netdev);
 
-	memcpy(&rx_hdr, (((u8 *)desc->head) + actual_length - 4),
-	       sizeof(rx_hdr));
+	/* At the end of the SKB, there's a header telling us how many packets
+	 * are bundled into this buffer and where we can find an array of
+	 * per-packet metadata (which contains elements encoded into u16).
+	 */
+
+	/* SKB contents for current firmware:
+	 *   <packet 1> <padding>
+	 *   ...
+	 *   <packet N> <padding>
+	 *   <per-packet metadata entry 1> <dummy header>
+	 *   ...
+	 *   <per-packet metadata entry N> <dummy header>
+	 *   <padding2> <rx_hdr>
+	 *
+	 * where:
+	 *   <packet N> contains pkt_len bytes:
+	 *		2 bytes of IP alignment pseudo header
+	 *		packet received
+	 *   <per-packet metadata entry N> contains 4 bytes:
+	 *		pkt_len and fields AX_RXHDR_*
+	 *   <padding>	0-7 bytes to terminate at
+	 *		8 bytes boundary (64-bit).
+	 *   <padding2> 4 bytes to make rx_hdr terminate at
+	 *		8 bytes boundary (64-bit)
+	 *   <dummy-header> contains 4 bytes:
+	 *		pkt_len=0 and AX_RXHDR_DROP_ERR
+	 *   <rx-hdr>	contains 4 bytes:
+	 *		pkt_cnt and hdr_off (offset of
+	 *		  <per-packet metadata entry 1>)
+	 *
+	 * pkt_cnt is number of entrys in the per-packet metadata.
+	 * In current firmware there is 2 entrys per packet.
+	 * The first points to the packet and the
+	 *  second is a dummy header.
+	 * This was done probably to align fields in 64-bit and
+	 *  maintain compatibility with old firmware.
+	 * This code assumes that <dummy header> and <padding2> are
+	 *  optional.
+	 */
+
+	if (skb->len < 4)
+		return 0;
+	skb_trim(skb, skb->len - 4);
+	memcpy(&rx_hdr, skb_tail_pointer(skb), 4);
 	le32_to_cpus(&rx_hdr);
+	pkt_cnt = (u16)rx_hdr;
+	hdr_off = (u16)(rx_hdr >> 16);
 
-	pkt_cnt = rx_hdr & 0xFF;
-	pkt_hdr_curr = hdr_off = rx_hdr >> 16;
+	if (pkt_cnt == 0)
+		return 0;
 
-	aa = (actual_length - (((pkt_cnt + 2) & 0xFE) * 4));
-	if ((aa != hdr_off) ||
-	    (hdr_off >= desc->urb->actual_length) ||
-	    (pkt_cnt == 0)) {
-		desc->urb->actual_length = 0;
-		stats->rx_length_errors++;
-		return;
+	/* Make sure that the bounds of the metadata array are inside the SKB
+	 * (and in front of the counter at the end).
+	 */
+	if (pkt_cnt * 4 + hdr_off > skb->len)
+		return 0;
+	pkt_hdr = (u32 *)(skb->data + hdr_off);
+
+	/* Packets must not overlap the metadata array */
+	skb_trim(skb, hdr_off);
+
+	for (; pkt_cnt > 0; pkt_cnt--, pkt_hdr++) {
+		u16 pkt_len_plus_padd;
+		u16 pkt_len;
+
+		le32_to_cpus(pkt_hdr);
+		pkt_len = (*pkt_hdr >> 16) & 0x1fff;
+		pkt_len_plus_padd = (pkt_len + 7) & 0xfff8;
+
+		/* Skip dummy header used for alignment
+		 */
+		if (pkt_len == 0)
+			continue;
+
+		if (pkt_len_plus_padd > skb->len)
+			return 0;
+
+		/* Check CRC or runt packet */
+		if ((*pkt_hdr & (AX_RXHDR_CRC_ERR | AX_RXHDR_DROP_ERR)) ||
+		    pkt_len < 2 + ETH_HLEN) {
+			dev->net->stats.rx_errors++;
+			skb_pull(skb, pkt_len_plus_padd);
+			continue;
+		}
+
+		/* last packet */
+		if (pkt_len_plus_padd == skb->len) {
+			skb_trim(skb, pkt_len);
+
+			/* Skip IP alignment pseudo header */
+			skb_pull(skb, 2);
+
+			skb->truesize = SKB_TRUESIZE(pkt_len_plus_padd);
+			ax88179_rx_checksum(skb, pkt_hdr);
+			return 1;
+		}
+
+		ax_skb = skb_clone(skb, GFP_ATOMIC);
+		if (!ax_skb)
+			return 0;
+		skb_trim(ax_skb, pkt_len);
+
+		/* Skip IP alignment pseudo header */
+		skb_pull(ax_skb, 2);
+
+		skb->truesize = pkt_len_plus_padd +
+				SKB_DATA_ALIGN(sizeof(struct sk_buff));
+		ax88179_rx_checksum(ax_skb, pkt_hdr);
+		usbnet_skb_return(dev, ax_skb);
+
+		skb_pull(skb, pkt_len_plus_padd);
 	}
 
-	rx_data = desc->head;
-	while (pkt_cnt--) {
-		u32 pkt_len;
-		struct sk_buff *skb;
-
-		memcpy(&pkt_hdr, (((u8 *)desc->head) + pkt_hdr_curr),
-		       sizeof(pkt_hdr));
-		pkt_hdr_curr += 4;
-
-		le32_to_cpus(&pkt_hdr);
-		pkt_len = (pkt_hdr >> 16) & 0x1FFF;
-
-		if (pkt_hdr & AX_RXHDR_CRC_ERR) {
-			stats->rx_crc_errors++;
-			goto find_next_rx;
-		}
-		if (pkt_hdr & AX_RXHDR_DROP_ERR) {
-			stats->rx_dropped++;
-			goto find_next_rx;
-		}
-
-		skb = napi_alloc_skb(napi, pkt_len);
-		if (!skb) {
-			stats->rx_dropped++;
-			goto find_next_rx;
-		}
-
-		memcpy(skb->data, rx_data, pkt_len);
-		skb_put(skb, pkt_len);
-
-		ax88179_rx_checksum(skb, &pkt_hdr);
-
-		skb->protocol = eth_type_trans(skb, netdev);
-
-		if (*work_done < budget) {
-			napi_gro_receive(&axdev->napi, skb);
-			*work_done += 1;
-			stats->rx_packets++;
-			stats->rx_bytes += pkt_len;
-		} else {
-			__skb_queue_tail(&axdev->rx_queue, skb);
-		}
-find_next_rx:
-		rx_data += (pkt_len + 7) & 0xFFF8;
-	}
+	return 0;
 }
 
 static int ax88179_system_suspend(struct ax_device *axdev)
@@ -1147,23 +1430,20 @@ static int ax88179_system_resume(struct ax_device *axdev)
 	u16 reg16;
 	u8 reg8;
 
-	reg16 = 0;
-	ax_write_cmd_nopm(axdev, AX_ACCESS_MAC, AX_PHYPWR_RSTCTL, 2, 2, &reg16);
-#if KERNEL_VERSION(2, 6, 36) <= LINUX_VERSION_CODE
-	usleep_range(1000, 2000);
-#else
-	msleep(20);
-#endif
-	reg16 = AX_PHYPWR_RSTCTL_IPRL;
-	ax_write_cmd_nopm(axdev, AX_ACCESS_MAC, AX_PHYPWR_RSTCTL, 2, 2, &reg16);
+	tmp16 = (u16 *)buf;
+	tmp = (u8 *)buf;
+
+	/* Power up ethernet PHY */
+	*tmp16 = 0;
+	ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_PHYPWR_RSTCTL, 2, 2, tmp16);
+
+	*tmp16 = AX_PHYPWR_RSTCTL_IPRL;
+	ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_PHYPWR_RSTCTL, 2, 2, tmp16);
+	msleep(500);
+
+	*tmp = AX_CLK_SELECT_ACS | AX_CLK_SELECT_BCS;
+	ax88179_write_cmd(dev, AX_ACCESS_MAC, AX_CLK_SELECT, 1, 1, tmp);
 	msleep(200);
-
-	ax88179_AutoDetach(axdev, 1);
-
-	ax_read_cmd_nopm(axdev, AX_ACCESS_MAC,  AX_CLK_SELECT, 1, 1, &reg8, 0);
-	reg8 |= AX_CLK_SELECT_ACS | AX_CLK_SELECT_BCS;
-	ax_write_cmd_nopm(axdev, AX_ACCESS_MAC, AX_CLK_SELECT, 1, 1, &reg8);
-	msleep(100);
 
 	reg16 = AX_RX_CTL_START | AX_RX_CTL_AP |
 		AX_RX_CTL_AMALL | AX_RX_CTL_AB;
