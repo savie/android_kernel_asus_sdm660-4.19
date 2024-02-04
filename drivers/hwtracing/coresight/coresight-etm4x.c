@@ -1386,15 +1386,15 @@ static int etm4_pm_setup_cpuslocked(void)
 		goto reduce_count;
 
 	ret = cpuhp_setup_state_nocalls_cpuslocked(CPUHP_AP_ARM_CORESIGHT_STARTING,
-						   "arm/coresight4:starting",
-						   etm4_starting_cpu, etm4_dying_cpu);
+					"arm/coresight4:starting",
+					etm4_starting_cpu, etm4_dying_cpu);
 
 	if (ret)
 		goto unregister_notifier;
 
 	ret = cpuhp_setup_state_nocalls_cpuslocked(CPUHP_AP_ONLINE_DYN,
-						   "arm/coresight4:online",
-						   etm4_online_cpu, NULL);
+					"arm/coresight4:online",
+					etm4_online_cpu, NULL);
 
 	/* HP dyn state ID returned in ret on success */
 	if (ret > 0) {
@@ -1539,7 +1539,6 @@ static int etm4_probe(struct amba_device *adev, const struct amba_id *id)
 
 err_arch_supported:
 	etmdrvdata[drvdata->cpu] = NULL;
-	etm4_pm_clear();
 	return ret;
 }
 
