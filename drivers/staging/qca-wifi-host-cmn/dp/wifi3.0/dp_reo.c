@@ -64,6 +64,7 @@ QDF_STATUS dp_reo_send_cmd(struct dp_soc *soc, enum hal_reo_cmd_type type,
 	struct dp_reo_cmd_info *reo_cmd = NULL;
 	int num;
 	QDF_STATUS ret;
+
 	if (callback_fn) {
 		reo_cmd = qdf_mem_malloc(sizeof(*reo_cmd));
 		if (!reo_cmd) {
@@ -109,7 +110,7 @@ QDF_STATUS dp_reo_send_cmd(struct dp_soc *soc, enum hal_reo_cmd_type type,
 	dp_reo_cmd_srng_event_record(soc, type, num);
 
 	if (num < 0) {
-		ret = QDF_STATUS_E_INVAL;
+		ret = QDF_STATUS_E_FAILURE;
 		goto fail_unlock;
 	}
 

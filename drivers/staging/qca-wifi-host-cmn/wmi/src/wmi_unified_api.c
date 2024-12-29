@@ -559,7 +559,7 @@ QDF_STATUS wmi_unified_wow_remove_wakeup_pattern_send(void *wmi_hdl,
  * Return: QDF_STATUS_SUCCESS on success and QDF_STATUS_E_FAILURE for failure
  */
 QDF_STATUS wmi_unified_ap_ps_cmd_send(void *wmi_hdl,
-					   uint8_t *peer_addr,
+					   uint8_t peer_addr[QDF_MAC_ADDR_SIZE],
 					   struct ap_ps_params *param)
 {
 	wmi_unified_t wmi_handle = (wmi_unified_t) wmi_hdl;
@@ -653,19 +653,6 @@ QDF_STATUS wmi_unified_vdev_set_param_send(void *wmi_hdl,
 
 	return QDF_STATUS_E_FAILURE;
 }
-
-#ifdef WLAN_FEATURE_ROAM_OFFLOAD
-QDF_STATUS
-wmi_unified_roam_set_param_send(wmi_unified_t wmi_handle,
-				struct vdev_set_params *roam_param)
-{
-	if (wmi_handle->ops->send_roam_set_param_cmd)
-		return wmi_handle->ops->send_roam_set_param_cmd(wmi_handle,
-								roam_param);
-
-	return QDF_STATUS_E_FAILURE;
-}
-#endif
 
 /**
  *  wmi_unified_sifs_trigger_send() - WMI vdev sifs trigger parameter function
