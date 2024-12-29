@@ -72,7 +72,6 @@ static uint8_t _std_init_vector_sha512_uint8[] = {
 	0x5B, 0xE0, 0xCD, 0x19, 0x13, 0x7E, 0x21, 0x79
 };
 
-static DEFINE_MUTEX(send_cmd_lock);
 static DEFINE_MUTEX(qcedev_sent_bw_req);
 static DEFINE_MUTEX(hash_access_lock);
 
@@ -1876,8 +1875,7 @@ static inline long qcedev_ioctl(struct file *file,
 			err = -ENOTTY;
 			goto exit_free_qcedev_areq;
 		}
-	case QCEDEV_IOCTL_SHA_UPDATE_REQ:
-		{
+	case QCEDEV_IOCTL_SHA_UPDATE_REQ: {
 		struct scatterlist sg_src;
 
 		if (copy_from_user(&qcedev_areq->sha_op_req,
@@ -1926,10 +1924,11 @@ static inline long qcedev_ioctl(struct file *file,
 				handle->sha_ctxt.diglen);
 		mutex_unlock(&hash_access_lock);
 		if (copy_to_user((void __user *)arg, &qcedev_areq->sha_op_req,
-					sizeof(struct qcedev_sha_op_req)))
+					sizeof(struct qcedev_sha_op_req))) {
 			err = -EFAULT;
 			goto exit_free_qcedev_areq;
 		}
+	}
 		break;
 
 	case QCEDEV_IOCTL_SHA_FINAL_REQ:
@@ -1977,8 +1976,7 @@ static inline long qcedev_ioctl(struct file *file,
 		handle->sha_ctxt.init_done = false;
 		break;
 
-	case QCEDEV_IOCTL_GET_SHA_REQ:
-		{
+	case QCEDEV_IOCTL_GET_SHA_REQ: {
 		struct scatterlist sg_src;
 
 		if (copy_from_user(&qcedev_areq->sha_op_req,
@@ -2018,10 +2016,11 @@ static inline long qcedev_ioctl(struct file *file,
 				handle->sha_ctxt.diglen);
 		mutex_unlock(&hash_access_lock);
 		if (copy_to_user((void __user *)arg, &qcedev_areq->sha_op_req,
-					sizeof(struct qcedev_sha_op_req)))
+					sizeof(struct qcedev_sha_op_req))) {
 			err = -EFAULT;
 			goto exit_free_qcedev_areq;
 		}
+	}
 		break;
 
 	case QCEDEV_IOCTL_MAP_BUF_REQ:
@@ -2038,7 +2037,7 @@ static inline long qcedev_ioctl(struct file *file,
 
 			if (map_buf.num_fds > ARRAY_SIZE(map_buf.fd)) {
 				pr_err("%s: err: num_fds = %d exceeds max value\n",
-				__func__, map_buf.num_fds);
+							__func__, map_buf.num_fds);
 				err = -EINVAL;
 				goto exit_free_qcedev_areq;
 			}
@@ -2080,7 +2079,7 @@ static inline long qcedev_ioctl(struct file *file,
 			}
 			if (unmap_buf.num_fds > ARRAY_SIZE(unmap_buf.fd)) {
 				pr_err("%s: err: num_fds = %d exceeds max value\n",
-				__func__, unmap_buf.num_fds);
+							__func__, unmap_buf.num_fds);
 				err = -EINVAL;
 				goto exit_free_qcedev_areq;
 			}
