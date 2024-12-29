@@ -43,6 +43,7 @@
 *.tab.[ch]
 *.tar
 *.xz
+*.zip*
 Module.symvers
 modules.builtin
 
@@ -115,10 +116,10 @@ GTAGS
 # id-utils files
 ID
 
-*.orig
+*.orig*
 *~
-*.bak
-*.rej
+*.bak*
+*.rej*
 \#*#
 
 #
